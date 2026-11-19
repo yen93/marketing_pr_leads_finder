@@ -1,0 +1,122 @@
+================================================================================
+UPDATE DOCUMENTATION: COLLABORATOR LEADS FINDER EDGE FUNCTION & WEEKLY AUTOMATION
+Timestamp: 19/11/26 14:55 (UTC+08:00)
+Workspace: marketing_pr_leads_finder (C:\Users\Cloverly\claude_code\marketing_pr_leads_finder)
+================================================================================
+
+1. ARCHITECTURE & PROJECT SCAFFOLDING
+--------------------------------------------------------------------------------
+* Problem / Context:
+  Needed an automated weekly pipeline to discover at least 20 potential media,
+  podcast, influencer, and social-media collaboration partners per week for
+  James Castrission / My Adventure Group (AU/NZ + Global English focus, modeled
+  after Diary of a CEO, BuzzFeed, and Agency Podcast while excluding
+  agencypodcast since James already collaborated with them).
+
+* Architectural Decision:
+  - Selected a hybrid OpenAI Responses API (`web_search` + strict `json_schema`)
+    plus direct website/contact-page and Apple iTunes/podcast RSS scraping stack.
+  - Only requires `OPENAI_API_KEY` (already configured on MAGTestProject) and
+    fits comfortably inside Supabase Edge Function execution limits.
+
+* Project Files Created:
+  - supabase/config.toml
+  - package.json (Node 24 native TypeScript unit test runner)
+  - .env.example
+  - .gitignore (updated to ignore SUPABASE_ACCESS_TOKEN.txt)
+  - README.md
+
+2. DATABASE SCHEMA & MIGRATIONS (DEPLOYED TO MAGTestProject: aivitcomiywiysrfwqxt)
+--------------------------------------------------------------------------------
+* Migration 1: supabase/migrations/20261119000001_create_collaboration_leads.sql
+  - Created `public.collaboration_scrape_runs`: audit log tracking
+    `trigger_source`, `status`, `target_count`, `rotation_week`,
+    `queries_executed`, `candidates_found`, `leads_inserted`,
+    `leads_skipped_duplicate`, `leads_skipped_no_email`, `error_message`,
+    `started_at`, and `completed_at`.
+  - Created `public.collaboration_leads`: stores `brand_name`, generated
+    `brand_name_normalized` (unique index for cross-week deduplication),
+    `brand_type`, `poc_name`, `poc_role`, `email`, generated `email_normalized`,
+    `email_source`, `email_verified_on_source`, `website_url`, `rss_feed_url`,
+    `source_url`, `platforms`, `platform_urls`, `region`, `niche`,
+    `audience_notes`, `outreach_status`, `run_id`, and timestamps.
+  - Enabled RLS with authenticated policies and added `updated_at` trigger.
+
+* Migration 2: supabase/migrations/20261119000002_schedule_weekly_collaboration_finder.sql
+  - Created `SECURITY DEFINER` function `public.invoke_find_collaborators(p_target_count, p_trigger_source)`
+    reading `project_url` and `find_collaborators_cron_secret` from Supabase Vault
+    and calling `net.http_post` (execute restricted to `postgres` and `service_role`).
+  - Idempotently registered weekly `pg_cron` job `weekly-find-collaborators`.
+
+* Migration 3: supabase/migrations/20261119000003_allow_nullable_unverified_email.sql
+  - Updated `public.collaboration_leads` to allow `email` and `email_source` to
+    be `NULL` so unverified AI-only emails are never stored while `brand_name`,
+    `poc_name`, and `poc_role` are still preserved.
+  - Added `collaboration_leads_verified_email_consistency_chk` enforcing
+    `(email is null and email_verified_on_source = false and email_source is null) or (email is not null)`.
+  - Added `leads_with_verified_email` integer column to `public.collaboration_scrape_runs`.
+
+3. EDGE FUNCTIONS & CRON SCHEDULES
+--------------------------------------------------------------------------------
+* Functions Created & Deployed (MAGTestProject: aivitcomiywiysrfwqxt):
+  - `find-collaborators` (active at v4, verify_jwt=false, custom constant-time
+    auth checking `x-cron-secret` against `CRON_SECRET` or Bearer
+    `SUPABASE_SERVICE_ROLE_KEY`):
+    - supabase/functions/find-collaborators/deno.json
+    - supabase/functions/find-collaborators/index.ts (HTTP entrypoint, auth, DB I/O)
+    - supabase/functions/find-collaborators/pipeline.ts (multi-batch loop, dedupe)
+    - supabase/functions/find-collaborators/openai_search.ts (Responses API + web_search)
+    - supabase/functions/find-collaborators/scraper.ts (iTunes RSS + site/contact scraper)
+    - supabase/functions/find-collaborators/config.ts (persona, exclusions, 16 rotating tracks)
+    - supabase/functions/find-collaborators/utils.ts (email scoring/filtering, social links, auth)
+    - supabase/functions/find-collaborators/types.ts
+    - supabase/functions/find-collaborators/__tests__/pipeline.test.ts
+
+* Iterative Refinements Across Versions (v1 -> v4):
+  - v2: Added Apple Podcasts numeric ID extraction (`extractApplePodcastId`) +
+    `https://itunes.apple.com/lookup?id=...` exact RSS lookup; strengthened prompt
+    against guessing generic `info@` emails.
+  - v3: Enforced 100% verified-only email policy—only emails directly scraped
+    from official podcast RSS feeds (`rss_feed`) or official brand websites/contact
+    pages (`website_scrape`) are saved; unverified AI emails are discarded and
+    the lead is saved POC-only (`email = NULL`). Added `isDirectoryOrSocialUrl`
+    guard to avoid scraping third-party directory footer emails.
+  - v4: Fixed OpenAI Responses API JSON truncation observed on live run #1
+    ("Unterminated string in JSON" when requesting 16 candidates per call) by
+    setting `max_output_tokens: 4500`, reducing per-batch request size to 6-8
+    candidates, increasing default `max_batches` to 6, selecting the final
+    assistant message block, adding `parseCandidatesJson` truncated-JSON salvage,
+    and strengthening named-POC prompting.
+
+* Secrets & Vault Configuration:
+  - Verified existing `OPENAI_API_KEY` secret on `MAGTestProject`.
+  - Generated 32-byte random `CRON_SECRET` (Edge Function secret).
+  - Configured Vault secrets: `project_url` (`https://aivitcomiywiysrfwqxt.supabase.co`)
+    and `find_collaborators_cron_secret`.
+
+* Schedules & Crons:
+  - Job Name: `weekly-find-collaborators` (`jobid: 47`, active: `true`)
+  - Cadence: `0 23 * * 0` UTC (Monday 09:00 AEST / 10:00 AEDT / 07:00 UTC+08:00)
+  - Command: `select public.invoke_find_collaborators(20, 'cron');`
+  - Trigger Mechanism: `pg_cron` -> `public.invoke_find_collaborators` -> `net.http_post`
+
+4. VERIFICATION & RESULTS
+--------------------------------------------------------------------------------
+* Unit Tests (`npm.cmd test`):
+  - 18/18 tests passing across 3 suites (`utils`, `scraper`, `openai_search helpers & weekly pipeline`).
+
+* Live Auth & Dry-Run Verification:
+  - Unauthenticated POST to `/functions/v1/find-collaborators` -> HTTP 401.
+  - Authenticated `dry_run: true` (`target_count: 5`) -> HTTP 200 in 18.7s,
+    returned 5 Australian candidates without writing to DB.
+
+* Live Production Runs (via `public.invoke_find_collaborators(20, 'manual')`):
+  - Run 1 (`07a5f53d-edca-4f3f-9e2e-b0111c16aab5`, v3): `status: partial`,
+    inserted 7 leads (3 verified emails, 4 POC-only); exposed JSON truncation bug
+    resolved in v4.
+  - Run 2 (`0062b52f-7754-4cc6-ae8b-74c3810a28f8`, v4): `status: completed` in
+    ~79s, inserted 22 new deduplicated leads (6 verified emails, 16 POC-only,
+    0 duplicates, 0 errors).
+  - Total rows in `public.collaboration_leads`: 29 leads (9 with 100% verified
+    emails via `website_scrape`, 20 POC-only with `email = NULL`).
+================================================================================

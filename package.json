@@ -1,0 +1,10 @@
+{
+  "name": "marketing-pr-leads-finder",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Automated weekly collaborator discovery pipeline for James Castrission / My Adventure Group",
+  "scripts": {
+    "test": "node --test supabase/functions/find-collaborators/__tests__/*.test.ts"
+  }
+}

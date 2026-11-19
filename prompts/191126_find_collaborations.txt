@@ -1,0 +1,19 @@
+**sample_influencers:**
+1. diary of a ceo
+2. buzzfeed
+3. agencypodcast (already collaborated with james)
+
+**platform_list:**
+facebook
+linkedin
+ig
+youtube
+all social platforms
+
+**context:**
+James Castrission Owns My Adventure Group. And we need to boost his soc med presence and reach. we need to find and collab with influencers/team of soc med people/soc med companies that run podcasts, collaborations, hostings, or similar. think sample_influencers. they should have a presence in any of the platform_list. 
+
+## main task:
+1. create an edge function that looks for these potential collaborators. we need, the company/channel/brand name, poc name, poc role, their email address. (what tool do we use for this? apify? or just openai ai search?)
+2. create new table for this and store scraped potential collaborators here
+3. automation to run once a week and should find at least 20 per week.

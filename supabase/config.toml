@@ -1,0 +1,25 @@
+# Supabase local development & Edge Function configuration
+# For full reference: https://supabase.com/docs/guides/cli/config
+
+project_id = "marketing-pr-leads-finder"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[functions.find-collaborators]
+# Keep JWT verification disabled at the gateway ONLY if invoking via x-cron-secret;
+# the function itself enforces either a valid SUPABASE_SERVICE_ROLE_KEY Bearer token
+# or matching CRON_SECRET header using constant-time comparison.
+verify_jwt = false
